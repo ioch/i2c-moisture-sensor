@@ -4,7 +4,7 @@
 #include <avr/interrupt.h>
 #include <avr/eeprom.h>
 //#include <avr/wdt.h>
-#include "sleep.h"
+#include <avr/sleep.h>	
 #include "thermistor.h"
 #include "twi.h"
 
@@ -48,7 +48,7 @@ inline static void ledOff() {
     LED_PORT &= ~_BV(LED_A);
 }
 
-inline static ledToggle() {
+inline static void ledToggle() {
     LED_PORT ^= _BV(LED_A);
 }
 
@@ -107,7 +107,7 @@ volatile uint16_t light = 0;
 
 #define PCINT1 1
 
-static inline stopLightMeaseurement() {
+static inline void stopLightMeaseurement() {
     GIMSK &= ~_BV(PCIE0);
     TCCR1B = 0;
     PCMSK0 &= ~_BV(PCINT1);
@@ -180,14 +180,14 @@ inline static void wdt_enable() {
 uint16_t currCapacitance = 0;
 int temperature = 0;
 
-static inline loopSensorMode() {
+static inline void loopSensorMode() {
     while(1) {
         if(twiDataInReceiveBuffer()) {
             uint8_t usiRx = twiReceiveByte();
 
             if(TWI_GET_CAPACITANCE == usiRx) {
-                twiTransmitByte(currCapacitance >> 8);
                 twiTransmitByte(currCapacitance &0x00FF);
+                twiTransmitByte(currCapacitance >> 8);
                 currCapacitance = getCapacitance();
             } else if(TWI_SET_ADDRESS == usiRx) {
                 uint8_t newAddress = twiReceiveByte();
@@ -208,14 +208,14 @@ static inline loopSensorMode() {
                 GIMSK &= ~_BV(PCIE0);//disable pin change interrupts
                 TCCR1B = 0;          //stop timer
                 
-                twiTransmitByte(lightCounter >> 8);
                 twiTransmitByte(lightCounter & 0x00FF);
+                twiTransmitByte(lightCounter >> 8);
 
                 GIMSK |= _BV(PCIE0); 
                 TCCR1B = _BV(CS10) | _BV(CS11);                 //start timer1 with prescaler clk/64
             } else if(TWI_GET_TEMPERATURE == usiRx) {
-                twiTransmitByte(temperature >> 8);
                 twiTransmitByte(temperature & 0x00FF);
+                twiTransmitByte(temperature >> 8);
                 temperature = getTemperature();
             } else if(TWI_RESET == usiRx) {
                 reset();
