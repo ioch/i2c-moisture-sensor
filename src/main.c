@@ -34,6 +34,14 @@
 #define I2C_ADDRESS_EEPROM_LOCATION (uint8_t*)0x01
 #define I2C_ADDRESS_DEFAULT         0x20
 
+#define filterLight 1/8
+#define filterCapacitance 1/16
+#define filterTemperature 1/4
+
+volatile int32_t filtLight =0;
+volatile int32_t filtCapacitance = 0;
+volatile int16_t filtTemperature = 0;
+
 inline static void ledSetup(){
     LED_DDR |= _BV(LED_A) | _BV(LED_K);
     LED_PORT &= ~_BV(LED_A);
@@ -103,9 +111,8 @@ uint16_t getCapacitance() {
 
 volatile uint16_t lightCounter = 0;
 volatile uint8_t lightCycleOver = 1;
-volatile uint16_t light = 0;
 
-#define PCINT1 1
+// #define PCINT1 1			// not acc libc
 
 static inline void stopLightMeaseurement() {
     GIMSK &= ~_BV(PCIE0);
@@ -120,14 +127,11 @@ ISR(PCINT0_vect) {
     GIMSK &= ~_BV(PCIE0);//disable pin change interrupts
     TCCR1B = 0;          //stop timer
     lightCounter = TCNT1;
-    light = lightCounter;
-    
     stopLightMeaseurement();
 }
 
 ISR(TIMER1_OVF_vect) {
     lightCounter = 65535;
-    light = lightCounter;
     stopLightMeaseurement();
 }
 
@@ -144,10 +148,10 @@ static inline uint16_t getLight() {
     LED_PORT &= ~_BV(LED_A);
     _delay_us(100);
     LED_DDR &= ~_BV(LED_K);                //make Cathode input
-    LED_PORT &= ~(_BV(LED_A) | _BV(LED_K));//disable pullups
+//    LED_PORT &= ~(_BV(LED_A) | _BV(LED_K));//disable pullups    ??? what?	
     
     TCNT1 = 0;
-    TCCR1A = 0;
+    TCCR1A = 0;								//???  never changed
     TCCR1B = _BV(CS10) | _BV(CS11);                 //start timer1 with prescaler clk/64
     
     PCMSK0 |= _BV(PCINT1);              //enable pin change interrupt on LED_K
@@ -186,9 +190,9 @@ static inline void loopSensorMode() {
             uint8_t usiRx = twiReceiveByte();
 
             if(TWI_GET_CAPACITANCE == usiRx) {
-                twiTransmitByte(currCapacitance &0x00FF);
-                twiTransmitByte(currCapacitance >> 8);
-                currCapacitance = getCapacitance();
+                twiTransmitByte(filtCapacitance &0x00FF);
+                twiTransmitByte(filtCapacitance >> 8);
+//                currCapacitance = getCapacitance();
             } else if(TWI_SET_ADDRESS == usiRx) {
                 uint8_t newAddress = twiReceiveByte();
                 if(twiIsValidAddress(newAddress)) {
@@ -205,18 +209,18 @@ static inline void loopSensorMode() {
                 }
 
             } else if(TWI_GET_LIGHT == usiRx) {
-                GIMSK &= ~_BV(PCIE0);//disable pin change interrupts
-                TCCR1B = 0;          //stop timer
+//                GIMSK &= ~_BV(PCIE0);//disable pin change interrupts
+//                TCCR1B = 0;          //stop timer
                 
-                twiTransmitByte(lightCounter & 0x00FF);
-                twiTransmitByte(lightCounter >> 8);
+                twiTransmitByte(filtLight & 0x00FF);
+                twiTransmitByte(filtLight >> 8);
 
-                GIMSK |= _BV(PCIE0); 
-                TCCR1B = _BV(CS10) | _BV(CS11);                 //start timer1 with prescaler clk/64
+//                GIMSK |= _BV(PCIE0); 
+//                TCCR1B = _BV(CS10) | _BV(CS11);                 //start timer1 with prescaler clk/64
             } else if(TWI_GET_TEMPERATURE == usiRx) {
-                twiTransmitByte(temperature & 0x00FF);
-                twiTransmitByte(temperature >> 8);
-                temperature = getTemperature();
+                twiTransmitByte(filtTemperature & 0x00FF);
+                twiTransmitByte(filtTemperature >> 8);
+//                temperature = getTemperature();
             } else if(TWI_RESET == usiRx) {
                 reset();
 
@@ -229,8 +233,16 @@ static inline void loopSensorMode() {
                 twiTransmitByte(isCapacitanceMeasurementInProgress() || 
                                 isTemperatureMeasurementInProgress() || 
                                 isLightMeasurementInProgress());
-            }
+            } 
         }
+        else if( (isCapacitanceMeasurementInProgress() || 
+			isTemperatureMeasurementInProgress() || 
+            isLightMeasurementInProgress()) == 0){
+				filtLight = filtLight +((int32_t)lightCounter-filtLight)*filterLight;
+				filtCapacitance = filtCapacitance +(((int32_t)getCapacitance()-200)*128-filtCapacitance)*filterCapacitance;
+				filtTemperature = filtTemperature +((int32_t)getTemperature()-filtTemperature)*filterTemperature;
+				getLight();
+		}
     }
 }
 
